@@ -205,6 +205,85 @@ router.post(
 );
 
 /**
+ * Submit bill for verification
+ */
+router.post(
+  "/bills/:billId/submit",
+  authenticateToken,
+  authorizeRoles("VENDOR"),
+  async (req, res) => {
+    const { billId } = req.params;
+    const userId = req.user.userId;
+
+    try {
+      // Get bill + ownership
+      const billResult = await pool.query(
+        `
+        SELECT b.id, b.status, v.user_id
+        FROM bills b
+        JOIN vendors v ON b.vendor_id = v.id
+        WHERE b.id = $1
+        `,
+        [billId]
+      );
+
+      if (billResult.rows.length === 0) {
+        return res.status(404).json({ message: "Bill not found" });
+      }
+
+      const bill = billResult.rows[0];
+
+      if (bill.user_id !== userId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      if (!["DRAFT", "REJECTED"].includes(bill.status)) {
+        return res.status(400).json({
+          message: "Only draft or rejected bills can be submitted",
+        });
+      }
+
+      // Ensure bill has items
+      const itemsResult = await pool.query(
+        "SELECT COUNT(*) FROM bill_items WHERE bill_id = $1",
+        [billId]
+      );
+
+      if (parseInt(itemsResult.rows[0].count, 10) === 0) {
+        return res.status(400).json({
+          message: "Cannot submit bill without items",
+        });
+      }
+
+      // Update status
+      await pool.query(
+        `
+        UPDATE bills
+        SET status = 'READY_FOR_VERIFICATION',
+            submitted_at = NOW()
+        WHERE id = $1
+        `,
+        [billId]
+      );
+
+      // Log action
+      await pool.query(
+        `
+        INSERT INTO bill_actions (bill_id, action, performed_by, role)
+        VALUES ($1, 'SUBMITTED', $2, 'VENDOR')
+        `,
+        [billId, userId]
+      );
+
+      res.json({ message: "Bill submitted successfully" });
+    } catch (err) {
+      console.error("SUBMIT BILL ERROR:", err);
+      res.status(500).json({ message: "Server error" });
+    }
+  }
+);
+
+/**
  * Get bill details (vendor / verifier / HQ)
  */
 router.get(
