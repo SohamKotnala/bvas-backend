@@ -32,9 +32,10 @@ router.post(
         [userId]
       );
 
-      if (vendorResult.rows.length === 0) {
-        return res.status(400).json({ message: "Vendor profile not found" });
-      }
+     if (vendorResult.rows.length === 0) {
+  return res.json([]);
+}
+
 
       const vendorId = vendorResult.rows[0].id;
 
@@ -47,9 +48,11 @@ const existingBill = await pool.query(
     AND month = $2
     AND year = $3
     AND district_code = $4
+    AND status IN ('DRAFT', 'READY_FOR_VERIFICATION')
   `,
   [vendorId, month, year, district_code]
 );
+
 
 if (existingBill.rows.length > 0) {
   return res.status(400).json({
@@ -327,7 +330,7 @@ router.get(
 
       // District verifier can see ONLY district bills
 if (role === "DISTRICT_VERIFIER") {
-  if (bill.district_code && bill.district_code !== req.user.district) {
+  if (bill.district_code !== req.user.district_code) {
     return res.status(403).json({ message: "Access denied" });
   }
 }
