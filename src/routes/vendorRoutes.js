@@ -218,30 +218,37 @@ router.post(
     try {
       // Get bill + ownership
       const billResult = await pool.query(
-        `
-        SELECT b.id, b.status, v.user_id
-        FROM bills b
-        JOIN vendors v ON b.vendor_id = v.id
-        WHERE b.id = $1
-        `,
-        [billId]
-      );
+  `
+  SELECT b.id, b.status, b.is_locked, v.user_id
+  FROM bills b
+  JOIN vendors v ON b.vendor_id = v.id
+  WHERE b.id = $1
+  `,
+  [billId]
+);
 
-      if (billResult.rows.length === 0) {
-        return res.status(404).json({ message: "Bill not found" });
-      }
+if (billResult.rows.length === 0) {
+  return res.status(404).json({ message: "Bill not found" });
+}
 
-      const bill = billResult.rows[0];
+const bill = billResult.rows[0];
 
-      if (bill.user_id !== userId) {
-        return res.status(403).json({ message: "Access denied" });
-      }
+if (bill.user_id !== userId) {
+  return res.status(403).json({ message: "Access denied" });
+}
 
-     if (bill.status !== "DRAFT") {
+if (bill.is_locked) {
+  return res.status(403).json({
+    message: "Bill is locked. Contact HQ.",
+  });
+}
+
+if (bill.status !== "DRAFT") {
   return res.status(400).json({
     message: "Only draft bills can be submitted",
   });
 }
+
 
 
       // Ensure bill has items
@@ -353,13 +360,21 @@ router.get(
         [billId]
       );
 
-      res.json({
-        bill,
-        items: itemsResult.rows,
-        actions: actionsResult.rows,
-        rejection_count: bill.rejection_count,
-        rejection_display: `${bill.rejection_count}/5`,
-      });
+      const latestRemark = actionsResult.rows.find(
+  (a) => a.remarks && a.role !== "VENDOR"
+);
+
+res.json({
+  bill: {
+    ...bill,
+    latest_remark: latestRemark ? latestRemark.remarks : null,
+  },
+  items: itemsResult.rows,
+  actions: actionsResult.rows,
+  rejection_count: bill.rejection_count,
+  rejection_display: `${bill.rejection_count}/5`,
+});
+
     } catch (err) {
       console.error(err);
       res.status(500).json({ message: "Server error" });
@@ -398,16 +413,30 @@ router.post(
       }
 
       if (bill.status !== "REJECTED") {
-        return res.status(400).json({
-          message: "Only rejected bills can be resubmitted",
-        });
-      }
+  return res.status(400).json({
+    message: "Only rejected bills can be resubmitted",
+  });
+}
 
-      if (bill.is_locked) {
-        return res.status(403).json({
-          message: "Bill is locked. Contact HQ.",
-        });
-      }
+if (bill.rejection_count >= 5) {
+  await pool.query(
+    `UPDATE bills SET is_locked = true WHERE id = $1`,
+    [billId]
+  );
+
+  return res.status(403).json({
+    message: "Maximum rejection limit reached. Bill locked.",
+  });
+}
+
+if (bill.is_locked) {
+  return res.status(403).json({
+    message: "Bill is locked. Contact HQ.",
+  });
+}
+
+
+
 
       await pool.query(
         `
