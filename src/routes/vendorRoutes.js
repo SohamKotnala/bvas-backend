@@ -316,6 +316,7 @@ router.get(
       const bill = billResult.rows[0];
 
      // Vendor can see ONLY own bill
+// Vendor can see ONLY own bill
 if (role === "VENDOR") {
   const vendorCheck = await pool.query(
     "SELECT id FROM vendors WHERE user_id = $1",
@@ -336,6 +337,7 @@ if (role === "DISTRICT_VERIFIER") {
     return res.status(403).json({ message: "Access denied" });
   }
 }
+
 
 
       // District verifier can see ONLY district bills
