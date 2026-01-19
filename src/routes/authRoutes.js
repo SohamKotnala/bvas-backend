@@ -12,17 +12,11 @@ router.post("/signup", async (req, res) => {
   const { username, password, role, district_code } = req.body;
 
   if (!username || !password || !role) {
-    return res.status(400).json({ message: "All fields are required" });
-  }
-
-  if (role === "DISTRICT_VERIFIER" && !district_code) {
-    return res
-      .status(400)
-      .json({ message: "District is required for verifier" });
+    return res.status(400).json({ message: "Missing required fields" });
   }
 
   try {
-    // Check existing user
+    // check if user already exists
     const existing = await pool.query(
       "SELECT id FROM users WHERE username = $1",
       [username]
@@ -32,41 +26,45 @@ router.post("/signup", async (req, res) => {
       return res.status(400).json({ message: "Username already exists" });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    // hash password
+    const passwordHash = await bcrypt.hash(password, 10);
 
-    // Create user
+    // insert user
     const userResult = await pool.query(
       `
-      INSERT INTO users (username, password, role, district_code)
+      INSERT INTO users (username, password_hash, role, district_code)
       VALUES ($1, $2, $3, $4)
-      RETURNING id
+      RETURNING id, role
       `,
-      [username, hashedPassword, role, district_code || null]
+      [username, passwordHash, role, district_code || null]
     );
 
     const userId = userResult.rows[0].id;
 
-    // Role-specific inserts
+    // role-specific inserts
     if (role === "VENDOR") {
       await pool.query(
-        "INSERT INTO vendors (user_id) VALUES ($1)",
-        [userId]
+        `
+        INSERT INTO vendors (user_id, vendor_name)
+        VALUES ($1, $2)
+        `,
+        [userId, username]
       );
     }
 
     if (role === "DISTRICT_VERIFIER") {
-      await pool.query(
-        "INSERT INTO verifiers (user_id, district_code) VALUES ($1, $2)",
-        [userId, district_code]
-      );
+      if (!district_code) {
+        return res
+          .status(400)
+          .json({ message: "District is required for verifier" });
+      }
+      // no separate table needed, district already stored in users
     }
 
-    // HQ_ADMIN → no extra table
-
-    res.status(201).json({ message: "User created successfully" });
+    return res.json({ message: "User created successfully" });
   } catch (err) {
     console.error("Signup error:", err);
-    res.status(500).json({ message: "Signup failed" });
+    return res.status(500).json({ message: "Signup failed" });
   }
 });
 
@@ -87,9 +85,9 @@ router.post("/login", async (req, res) => {
     }
 
     const user = result.rows[0];
-    const isValid = await bcrypt.compare(password, user.password);
 
-    if (!isValid) {
+    const match = await bcrypt.compare(password, user.password_hash);
+    if (!match) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
@@ -97,7 +95,7 @@ router.post("/login", async (req, res) => {
       {
         userId: user.id,
         role: user.role,
-        district_code: user.district_code,
+        district_code: user.district_code || null,
       },
       process.env.JWT_SECRET,
       { expiresIn: "1d" }
