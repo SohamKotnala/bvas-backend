@@ -9,9 +9,9 @@ const router = express.Router();
  * SIGNUP
  */
 router.post("/signup", async (req, res) => {
-  const { username, password, role, district_code } = req.body;
+  const { username, password_hash, role, district_code } = req.body;
 
-  if (!username || !password || !role) {
+  if (!username || !password_hash || !role) {
     return res.status(400).json({ message: "Missing required fields" });
   }
 
@@ -26,20 +26,28 @@ router.post("/signup", async (req, res) => {
       return res.status(400).json({ message: "Username already exists" });
     }
 
-    // hash password
-    const passwordHash = await bcrypt.hash(password, 10);
+    // hash password_hash
+    const password_hashHash = await bcrypt.hash(password_hash, 10);
 
     // insert user
     const userResult = await pool.query(
       `
-      INSERT INTO users (username, password_hash, role, district_code)
+      INSERT INTO users (username, password_hash_hash, role, district_code)
       VALUES ($1, $2, $3, $4)
       RETURNING id, role
       `,
-      [username, passwordHash, role, district_code || null]
+      [username, password_hashHash, role, district_code || null]
     );
 
     const userId = userResult.rows[0].id;
+
+    if (role === "VENDOR") {
+  await pool.query(
+    "INSERT INTO vendors (user_id, vendor_name) VALUES ($1, $2)",
+    [userId, username]
+  );
+}
+
 
     // role-specific inserts
     if (role === "VENDOR") {
@@ -72,7 +80,7 @@ router.post("/signup", async (req, res) => {
  * LOGIN
  */
 router.post("/login", async (req, res) => {
-  const { username, password } = req.body;
+  const { username, password_hash } = req.body;
 
   try {
     const result = await pool.query(
@@ -86,7 +94,7 @@ router.post("/login", async (req, res) => {
 
     const user = result.rows[0];
 
-    const match = await bcrypt.compare(password, user.password_hash);
+    const match = await bcrypt.compare(password_hash, user.password_hash_hash);
     if (!match) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
