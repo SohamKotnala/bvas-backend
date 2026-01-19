@@ -13,7 +13,16 @@ const pool = require("./db");
 
 const app = express();
 
-app.use(cors());
+app.use(
+  cors({
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
+// 🔥 THIS LINE IS CRITICAL
+app.options("*", cors());
 app.use(express.json());
 
 app.get("/", async (req, res) => {
