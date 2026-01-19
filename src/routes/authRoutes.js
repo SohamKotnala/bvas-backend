@@ -5,105 +5,65 @@ const pool = require("../db");
 
 const router = express.Router();
 
-/**
- * SIGNUP
- */
 router.post("/signup", async (req, res) => {
   const { username, password, role, district_code } = req.body;
 
   if (!username || !password || !role) {
-    return res.status(400).json({ message: "Missing required fields" });
+    return res.status(400).json({ message: "Missing fields" });
   }
 
   try {
-    // check if user exists
-    const existing = await pool.query(
-      "SELECT id FROM users WHERE username = $1",
-      [username]
-    );
+    const hashed = await bcrypt.hash(password, 10);
 
-    if (existing.rows.length > 0) {
-      return res.status(400).json({ message: "Username already exists" });
-    }
-
-    // hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // insert user
-    const userResult = await pool.query(
+    const user = await pool.query(
       `
       INSERT INTO users (username, password_hash, role, district_code)
-      VALUES ($1, $2, $3, $4)
+      VALUES ($1,$2,$3,$4)
       RETURNING id, role
       `,
-      [username, hashedPassword, role, district_code || null]
+      [username, hashed, role, district_code || null]
     );
 
-    const userId = userResult.rows[0].id;
-
-    // create vendor profile if vendor
     if (role === "VENDOR") {
       await pool.query(
-        "INSERT INTO vendors (user_id, vendor_name) VALUES ($1, $2)",
-        [userId, username]
+        "INSERT INTO vendors (user_id, vendor_name) VALUES ($1,$2)",
+        [user.rows[0].id, username]
       );
     }
 
-    return res.status(201).json({
-      message: "User created successfully",
-    });
-  } catch (err) {
-    console.error("Signup error:", err);
-    return res.status(500).json({ message: "Signup failed" });
+    res.json({ message: "Signup OK" });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ message: "Signup failed" });
   }
 });
 
-/**
- * LOGIN
- */
 router.post("/login", async (req, res) => {
   const { username, password } = req.body;
 
-  try {
-    const result = await pool.query(
-      "SELECT * FROM users WHERE username = $1",
-      [username]
-    );
+  const result = await pool.query(
+    "SELECT * FROM users WHERE username=$1",
+    [username]
+  );
 
-    if (result.rows.length === 0) {
-      return res.status(401).json({ message: "Invalid credentials" });
-    }
-
-    const user = result.rows[0];
-
-    const match = await bcrypt.compare(password, user.password_hash);
-    if (!match) {
-      return res.status(401).json({ message: "Invalid credentials" });
-    }
-
-    const token = jwt.sign(
-      {
-        userId: user.id,
-        role: user.role,
-        district_code: user.district_code || null,
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: "1d" }
-    );
-
-    res.json({
-      token,
-      user: {
-        id: user.id,
-        username: user.username,
-        role: user.role,
-        district_code: user.district_code,
-      },
-    });
-  } catch (err) {
-    console.error("Login error:", err);
-    res.status(500).json({ message: "Login failed" });
+  if (!result.rows.length) {
+    return res.status(401).json({ message: "Invalid credentials" });
   }
+
+  const user = result.rows[0];
+  const ok = await bcrypt.compare(password, user.password_hash);
+
+  if (!ok) {
+    return res.status(401).json({ message: "Invalid credentials" });
+  }
+
+  const token = jwt.sign(
+    { userId: user.id, role: user.role, district_code: user.district_code },
+    process.env.JWT_SECRET,
+    { expiresIn: "1d" }
+  );
+
+  res.json({ token });
 });
 
 module.exports = router;
