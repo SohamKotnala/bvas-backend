@@ -7,7 +7,7 @@ async function hashpassword_hashs() {
   const hash = await bcrypt.hash(password_hash, salt);
 
   await pool.query(
-    "UPDATE users SET password_hash_hash = $1 WHERE password_hash_hash = 'temp123'",
+    "UPDATE users SET password_hash = $1 WHERE password_hash = 'temp123'",
     [hash]
   );
 

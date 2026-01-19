@@ -20,7 +20,7 @@ router.get(
   authorizeRoles("DISTRICT_VERIFIER"),
   async (req, res) => {
     const { status } = req.query;
-    const district = req.user.district;
+    const district = req.user.district_code;
 
     try {
       let query = `
@@ -36,10 +36,17 @@ router.get(
         params.push(status);
         conditions.push(`b.status = $${params.length}`);
       }
+      
+      if (!req.user.district_code) {
+  return res.status(403).json({
+    message: "Verifier district not found in token. Please re-login.",
+  });
+}
+
 
       if (district) {
-        params.push(district);
-        conditions.push(`b.district_code = $${params.length}`);
+        arams.push(req.user.district_code);
+conditions.push(`b.district_code = $${params.length}`);
       }
 
       if (conditions.length) {
@@ -65,7 +72,7 @@ router.get(
   authenticateToken,
   authorizeRoles("DISTRICT_VERIFIER"),
   async (req, res) => {
-    if (!req.user.district) {
+    if (!req.user.district_code) {
       return res.status(400).json({
         message: "Verifier district not found in token. Please re-login.",
       });
@@ -101,7 +108,7 @@ ORDER BY b.id DESC;
 
 
         `,
-        [req.user.district]
+        [req.user.district_code]
       );
 
       res.json(result.rows);
@@ -189,7 +196,8 @@ if (billResult.rows.length === 0) {
   return res.status(404).json({ message: "Bill not found" });
 }
 
-if (billResult.rows[0].district_code !== req.user.district) {
+if (billResult.rows[0].district_code !== req.user.district_code) {
+
   return res.status(403).json({
     message: "You are not allowed to act on bills from another district",
   });

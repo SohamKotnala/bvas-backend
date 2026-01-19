@@ -31,9 +31,8 @@ router.post(
         "SELECT id FROM vendors WHERE user_id = $1",
         [userId]
       );
-
-     if (vendorResult.rows.length === 0) {
-  return res.json([]);
+if (vendorResult.rows.length === 0) {
+  return res.status(403).json({ message: "Vendor profile not found" });
 }
 
 
@@ -316,21 +315,32 @@ router.get(
 
       const bill = billResult.rows[0];
 
-      // Vendor can see ONLY own bill
-      if (role === "VENDOR") {
-        const vendorCheck = await pool.query(
-          "SELECT id FROM vendors WHERE user_id = $1",
-          [userId]
-        );
+     // Vendor can see ONLY own bill
+if (role === "VENDOR") {
+  const vendorCheck = await pool.query(
+    "SELECT id FROM vendors WHERE user_id = $1",
+    [userId]
+  );
 
-        if (vendorCheck.rows[0].id !== bill.vendor_id) {
-          return res.status(403).json({ message: "Access denied" });
-        }
-      }
+  if (
+    vendorCheck.rows.length === 0 ||
+    vendorCheck.rows[0].id !== bill.vendor_id
+  ) {
+    return res.status(403).json({ message: "Access denied" });
+  }
+}
+
+// District verifier can see ONLY district bills
+if (role === "DISTRICT_VERIFIER") {
+  if (bill.district_code !== req.user.district_code) {
+    return res.status(403).json({ message: "Access denied" });
+  }
+}
+
 
       // District verifier can see ONLY district bills
 if (role === "DISTRICT_VERIFIER") {
-  if (bill.district_code !== req.user.district_code) {
+  if (bill.district_code !== req.user.district_code_code) {
     return res.status(403).json({ message: "Access denied" });
   }
 }
