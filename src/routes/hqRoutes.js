@@ -21,7 +21,7 @@ router.get(
           COUNT(*) FILTER (
             WHERE status = 'READY_FOR_VERIFICATION' AND is_locked = false
           ) AS pending,
-          COUNT(*) FILTER (WHERE status = 'APPROVED') AS approved,
+          COUNT(*) FILTER (WHERE status = 'APPROVED') AS APPROVED,
           COUNT(*) FILTER (WHERE status = 'REJECTED') AS rejected,
           COUNT(*) FILTER (WHERE is_locked = true) AS locked,
           (SELECT COUNT(*) FROM vendors) AS total_vendors,

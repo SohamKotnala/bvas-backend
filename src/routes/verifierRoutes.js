@@ -111,7 +111,7 @@ router.get(
 );
 
 /**
- * Approve or reject a bill
+ * APPROVED or reject a bill
  */
 router.post(
   "/bills/:billId/action",
@@ -123,11 +123,11 @@ router.post(
     const verifierId = req.user.userId;
     const district = req.user.district_code;
 
-    if (!["APPROVE", "REJECT"].includes(action)) {
-      return res.status(400).json({ message: "Invalid action" });
-    }
+    if (!["APPROVED", "REJECTED"].includes(action)) {
+  return res.status(400).json({ message: "Invalid action" });
+}
 
-    if (action === "REJECT" && !remarks) {
+    if (action === "REJECTED" && !remarks) {
       return res.status(400).json({
         message: "Remarks required for rejection",
       });
@@ -157,7 +157,7 @@ router.post(
         });
       }
 
-      if (action === "APPROVE") {
+      if (action === "APPROVED") {
         const itemsResult = await pool.query(
           "SELECT COUNT(*) FROM bill_items WHERE bill_id = $1",
           [billId]
@@ -213,14 +213,14 @@ router.post(
       await pool.query(
         `
         INSERT INTO bill_actions (bill_id, action, performed_by, role, remarks)
-        VALUES ($1, $2, $3, 'DISTRICT_VERIFIER', $4)
+VALUES ($1, $2, $3, 'DISTRICT_VERIFIER', $4)
         `,
         [billId, action, verifierId, remarks || null]
       );
 
       res.json({
         message:
-          action === "APPROVE"
+          action === "APPROVED"
             ? "Bill approved successfully"
             : "Bill rejected successfully",
       });
