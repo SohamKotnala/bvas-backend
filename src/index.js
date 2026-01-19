@@ -6,25 +6,20 @@ const authRoutes = require("./routes/authRoutes");
 const vendorRoutes = require("./routes/vendorRoutes");
 const verifierRoutes = require("./routes/verifierRoutes");
 const hqRoutes = require("./routes/hqRoutes");
-const { authenticateToken, authorizeRoles } = require("./middleware/authMiddleware");
 const pool = require("./db");
 
 const app = express();
 
 /* ===============================
-   ✅ CORS (FIXED FOR NODE 22)
+   CORS (CORRECT & SAFE)
 ================================ */
 app.use(
   cors({
     origin: "*",
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
-
-/* ❌ REMOVE THIS LINE — IT BREAKS EXPRESS 5 / NODE 22
-app.options("*", cors());
-*/
 
 app.use(express.json());
 
@@ -38,8 +33,7 @@ app.get("/", async (req, res) => {
       message: "BVAS Backend Running",
       dbTime: result.rows[0].now,
     });
-  } catch (err) {
-    console.error(err);
+  } catch {
     res.status(500).send("Database connection error");
   }
 });
@@ -53,31 +47,7 @@ app.use("/api/verifier", verifierRoutes);
 app.use("/api/hq", hqRoutes);
 
 /* ===============================
-   PROTECTED TEST ROUTES
-================================ */
-app.get(
-  "/api/protected/vendor",
-  authenticateToken,
-  authorizeRoles("VENDOR"),
-  (req, res) => {
-    res.json({
-      message: "Vendor access granted",
-      user: req.user,
-    });
-  }
-);
-
-app.get(
-  "/api/protected/verifier",
-  authenticateToken,
-  authorizeRoles("DISTRICT_VERIFIER"),
-  (req, res) => {
-    res.json(req.user);
-  }
-);
-
-/* ===============================
-   SERVER
+   START SERVER
 ================================ */
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
