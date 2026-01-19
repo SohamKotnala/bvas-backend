@@ -237,11 +237,12 @@ router.post(
         return res.status(403).json({ message: "Access denied" });
       }
 
-      if (!["DRAFT", "REJECTED"].includes(bill.status)) {
-        return res.status(400).json({
-          message: "Only draft or rejected bills can be submitted",
-        });
-      }
+     if (bill.status !== "DRAFT") {
+  return res.status(400).json({
+    message: "Only draft bills can be submitted",
+  });
+}
+
 
       // Ensure bill has items
       const itemsResult = await pool.query(
@@ -282,6 +283,8 @@ router.post(
     }
   }
 );
+
+
 
 /**
  * Get bill details (vendor / verifier / HQ)
@@ -357,6 +360,165 @@ router.get(
         rejection_count: bill.rejection_count,
         rejection_display: `${bill.rejection_count}/5`,
       });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: "Server error" });
+    }
+  }
+);
+
+router.post(
+  "/bills/:billId/resubmit",
+  authenticateToken,
+  authorizeRoles("VENDOR"),
+  async (req, res) => {
+    const { billId } = req.params;
+    const userId = req.user.userId;
+    const { remarks } = req.body;
+
+    try {
+      const billResult = await pool.query(
+        `
+        SELECT b.status, b.is_locked, b.rejection_count, v.user_id
+        FROM bills b
+        JOIN vendors v ON b.vendor_id = v.id
+        WHERE b.id = $1
+        `,
+        [billId]
+      );
+
+      if (billResult.rows.length === 0) {
+        return res.status(404).json({ message: "Bill not found" });
+      }
+
+      const bill = billResult.rows[0];
+
+      if (bill.user_id !== userId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      if (bill.status !== "REJECTED") {
+        return res.status(400).json({
+          message: "Only rejected bills can be resubmitted",
+        });
+      }
+
+      if (bill.is_locked) {
+        return res.status(403).json({
+          message: "Bill is locked. Contact HQ.",
+        });
+      }
+
+      await pool.query(
+        `
+        UPDATE bills
+        SET status = 'READY_FOR_VERIFICATION',
+            remarks = NULL
+        WHERE id = $1
+        `,
+        [billId]
+      );
+
+      await pool.query(
+        `
+        INSERT INTO bill_actions (bill_id, action, performed_by, role, remarks)
+        VALUES ($1, 'RESUBMITTED', $2, 'VENDOR', $3)
+        `,
+        [billId, userId, remarks || null]
+      );
+
+      res.json({ message: "Bill resubmitted successfully" });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: "Server error" });
+    }
+  }
+);
+
+router.delete(
+  "/bills/:billId/items/:itemId",
+  authenticateToken,
+  authorizeRoles("VENDOR"),
+  async (req, res) => {
+    const { billId, itemId } = req.params;
+    const userId = req.user.userId;
+
+    try {
+      const billCheck = await pool.query(
+        `
+        SELECT b.status, v.user_id
+        FROM bills b
+        JOIN vendors v ON b.vendor_id = v.id
+        WHERE b.id = $1
+        `,
+        [billId]
+      );
+
+      if (billCheck.rows.length === 0) {
+        return res.status(404).json({ message: "Bill not found" });
+      }
+
+      if (billCheck.rows[0].user_id !== userId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      if (!["DRAFT", "REJECTED"].includes(billCheck.rows[0].status)) {
+        return res.status(400).json({
+          message: "Items cannot be modified in current bill state",
+        });
+      }
+
+      await pool.query(
+        "DELETE FROM bill_items WHERE id = $1 AND bill_id = $2",
+        [itemId, billId]
+      );
+
+      res.json({ message: "Item deleted successfully" });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: "Server error" });
+    }
+  }
+);
+router.delete(
+  "/bills/:billId/items",
+  authenticateToken,
+  authorizeRoles("VENDOR"),
+  async (req, res) => {
+    const { billId } = req.params;
+    const userId = req.user.userId;
+
+    try {
+      const billCheck = await pool.query(
+        `
+        SELECT b.status, v.user_id
+        FROM bills b
+        JOIN vendors v ON b.vendor_id = v.id
+        WHERE b.id = $1
+        `,
+        [billId]
+      );
+
+      if (billCheck.rows.length === 0) {
+        return res.status(404).json({ message: "Bill not found" });
+      }
+
+      if (billCheck.rows[0].user_id !== userId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      if (billCheck.rows[0].status !== "REJECTED") {
+        return res.status(400).json({
+          message: "Items can only be cleared after rejection",
+        });
+      }
+
+      await pool.query(
+        "DELETE FROM bill_items WHERE bill_id = $1",
+        [billId]
+      );
+
+      res.json({ message: "Items cleared successfully" });
     } catch (err) {
       console.error(err);
       res.status(500).json({ message: "Server error" });
