@@ -36,24 +36,24 @@ router.post(
 
       const vendorId = vendorResult.rows[0].id;
 
-      const existingBill = await pool.query(
-        `
-        SELECT id, status
-        FROM bills
-        WHERE vendor_id = $1
-          AND month = $2
-          AND year = $3
-          AND district_code = $4
-          AND status IN ('DRAFT', 'READY_FOR_VERIFICATION', 'REJECTED')
-        `,
-        [vendorId, month, year, district_code]
-      );
+const existingBill = await pool.query(
+  `
+  SELECT id
+  FROM bills
+  WHERE vendor_id = $1
+    AND month = $2
+    AND year = $3
+    AND district_code = $4
+  `,
+  [vendorId, month, year, district_code]
+);
 
-      if (existingBill.rows.length > 0) {
-        return res.status(400).json({
-          message: "Bill already exists for this month and district",
-        });
-      }
+if (existingBill.rows.length > 0) {
+  return res.status(400).json({
+    message: "Bill already exists for this month, year and district",
+  });
+}
+
 
       const billResult = await pool.query(
         `
