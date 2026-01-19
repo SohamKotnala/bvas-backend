@@ -9,14 +9,14 @@ const router = express.Router();
  * SIGNUP
  */
 router.post("/signup", async (req, res) => {
-  const { username, password_hash, role, district_code } = req.body;
+  const { username, password, role, district_code } = req.body;
 
-  if (!username || !password_hash || !role) {
+  if (!username || !password || !role) {
     return res.status(400).json({ message: "Missing required fields" });
   }
 
   try {
-    // check if user already exists
+    // check if user exists
     const existing = await pool.query(
       "SELECT id FROM users WHERE username = $1",
       [username]
@@ -26,50 +26,32 @@ router.post("/signup", async (req, res) => {
       return res.status(400).json({ message: "Username already exists" });
     }
 
-    // hash password_hash
-    const password_hashHash = await bcrypt.hash(password_hash, 10);
+    // hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     // insert user
     const userResult = await pool.query(
       `
-      INSERT INTO users (username, password_hash_hash, role, district_code)
+      INSERT INTO users (username, password_hash, role, district_code)
       VALUES ($1, $2, $3, $4)
       RETURNING id, role
       `,
-      [username, password_hashHash, role, district_code || null]
+      [username, hashedPassword, role, district_code || null]
     );
 
     const userId = userResult.rows[0].id;
 
-    if (role === "VENDOR") {
-  await pool.query(
-    "INSERT INTO vendors (user_id, vendor_name) VALUES ($1, $2)",
-    [userId, username]
-  );
-}
-
-
-    // role-specific inserts
+    // create vendor profile if vendor
     if (role === "VENDOR") {
       await pool.query(
-        `
-        INSERT INTO vendors (user_id, vendor_name)
-        VALUES ($1, $2)
-        `,
+        "INSERT INTO vendors (user_id, vendor_name) VALUES ($1, $2)",
         [userId, username]
       );
     }
 
-    if (role === "DISTRICT_VERIFIER") {
-      if (!district_code) {
-        return res
-          .status(400)
-          .json({ message: "District is required for verifier" });
-      }
-      // no separate table needed, district already stored in users
-    }
-
-    return res.json({ message: "User created successfully" });
+    return res.status(201).json({
+      message: "User created successfully",
+    });
   } catch (err) {
     console.error("Signup error:", err);
     return res.status(500).json({ message: "Signup failed" });
@@ -80,7 +62,7 @@ router.post("/signup", async (req, res) => {
  * LOGIN
  */
 router.post("/login", async (req, res) => {
-  const { username, password_hash } = req.body;
+  const { username, password } = req.body;
 
   try {
     const result = await pool.query(
@@ -94,7 +76,7 @@ router.post("/login", async (req, res) => {
 
     const user = result.rows[0];
 
-    const match = await bcrypt.compare(password_hash, user.password_hash_hash);
+    const match = await bcrypt.compare(password, user.password_hash);
     if (!match) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
