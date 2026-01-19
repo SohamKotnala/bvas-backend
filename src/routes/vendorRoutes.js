@@ -84,6 +84,56 @@ router.post(
 );
 
 /**
+ * Get all bills for logged-in vendor
+ */
+router.get(
+  "/bills",
+  authenticateToken,
+  authorizeRoles("VENDOR"),
+  async (req, res) => {
+    try {
+      const userId = req.user.userId;
+
+      const vendorResult = await pool.query(
+        "SELECT id FROM vendors WHERE user_id = $1",
+        [userId]
+      );
+
+      if (vendorResult.rows.length === 0) {
+        return res.status(404).json({
+          message: "Vendor profile not found",
+        });
+      }
+
+      const vendorId = vendorResult.rows[0].id;
+
+      const billsResult = await pool.query(
+        `
+        SELECT
+          id,
+          month,
+          year,
+          district_code,
+          status
+        FROM bills
+        WHERE vendor_id = $1
+        ORDER BY id DESC
+        `,
+        [vendorId]
+      );
+
+      res.json(billsResult.rows);
+    } catch (err) {
+      console.error("GET VENDOR BILLS ERROR:", err);
+      res.status(500).json({
+        message: "Failed to load bills",
+      });
+    }
+  }
+);
+
+
+/**
  * Add bill items
  */
 router.post(
