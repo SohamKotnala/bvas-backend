@@ -17,30 +17,28 @@ router.get(
   async (req, res) => {
     try {
       const summary = await pool.query(`
-  SELECT
-    COUNT(*) FILTER (WHERE status = 'READY_FOR_VERIFICATION') AS pending,
-COUNT(*) FILTER (WHERE status = 'APPROVED') AS approved,
-COUNT(*) FILTER (WHERE status = 'REJECTED') AS rejected,
-    COUNT(*) FILTER (WHERE is_locked = true) AS locked,
-    (SELECT COUNT(*) FROM vendors) AS total_vendors,
-    (SELECT COUNT(*) FROM users WHERE role = 'DISTRICT_VERIFIER') AS total_verifiers
-  FROM bills
-`);
+        SELECT
+          COUNT(*) FILTER (
+            WHERE status = 'READY_FOR_VERIFICATION' AND is_locked = false
+          ) AS pending,
+          COUNT(*) FILTER (WHERE status = 'APPROVED') AS approved,
+          COUNT(*) FILTER (WHERE status = 'REJECTED') AS rejected,
+          COUNT(*) FILTER (WHERE is_locked = true) AS locked,
+          (SELECT COUNT(*) FROM vendors) AS total_vendors,
+          (SELECT COUNT(*) FROM users WHERE role = 'DISTRICT_VERIFIER') AS total_verifiers
+        FROM bills
+      `);
 
       res.json(summary.rows[0]);
     } catch (err) {
-      console.error(err);
+      console.error("HQ DASHBOARD ERROR:", err);
       res.status(500).json({ message: "Server error" });
     }
   }
 );
 
 /**
- * HQ – View ALL bills with filters
- * ?status=
- * ?vendor_id=
- * ?verifier_id=
- * ?month=&year=
+ * HQ – View ALL bills
  */
 router.get(
   "/bills",
@@ -104,14 +102,14 @@ router.get(
 
       res.json(result.rows);
     } catch (err) {
-      console.error(err);
+      console.error("HQ BILLS ERROR:", err);
       res.status(500).json({ message: "Server error" });
     }
   }
 );
 
 /**
- * HQ – View full bill details + audit trail
+ * HQ – View bill details
  */
 router.get(
   "/bills/:billId",
@@ -166,14 +164,14 @@ router.get(
         rejection_display: `${billResult.rows[0].rejection_count}/5`,
       });
     } catch (err) {
-      console.error(err);
+      console.error("HQ BILL DETAILS ERROR:", err);
       res.status(500).json({ message: "Server error" });
     }
   }
 );
 
 /**
- * HQ – Unlock a locked bill
+ * HQ – Unlock bill
  */
 router.post(
   "/bills/:billId/unlock",
@@ -184,16 +182,24 @@ router.post(
     const adminId = req.user.userId;
 
     try {
+      const result = await pool.query(
+        "SELECT is_locked FROM bills WHERE id = $1",
+        [billId]
+      );
+
+      if (!result.rows.length) {
+        return res.status(404).json({ message: "Bill not found" });
+      }
+
+      if (!result.rows[0].is_locked) {
+        return res.status(400).json({ message: "Bill is not locked" });
+      }
+
       await pool.query(
         `
         UPDATE bills
-SET
-  is_locked = false,
-  rejection_count = 0,
-  status = 'REJECTED'
-WHERE id = $1
-
-
+        SET is_locked = false
+        WHERE id = $1
         `,
         [billId]
       );
@@ -208,14 +214,14 @@ WHERE id = $1
 
       res.json({ message: "Bill unlocked successfully" });
     } catch (err) {
-      console.error(err);
+      console.error("HQ UNLOCK ERROR:", err);
       res.status(500).json({ message: "Server error" });
     }
   }
 );
 
 /**
- * HQ – Lock a bill manually
+ * HQ – Lock bill
  */
 router.post(
   "/bills/:billId/lock",
@@ -227,6 +233,19 @@ router.post(
     const { reason } = req.body;
 
     try {
+      const result = await pool.query(
+        "SELECT is_locked FROM bills WHERE id = $1",
+        [billId]
+      );
+
+      if (!result.rows.length) {
+        return res.status(404).json({ message: "Bill not found" });
+      }
+
+      if (result.rows[0].is_locked) {
+        return res.status(400).json({ message: "Bill is already locked" });
+      }
+
       await pool.query(
         `
         UPDATE bills
@@ -242,16 +261,15 @@ router.post(
         (bill_id, action, performed_by, role, remarks)
         VALUES ($1, 'LOCKED', $2, 'HQ_ADMIN', $3)
         `,
-        [billId, adminId, reason || 'Locked by HQ']
+        [billId, adminId, reason || "Locked by HQ"]
       );
 
       res.json({ message: "Bill locked successfully" });
     } catch (err) {
-      console.error(err);
+      console.error("HQ LOCK ERROR:", err);
       res.status(500).json({ message: "Server error" });
     }
   }
 );
-
 
 module.exports = router;

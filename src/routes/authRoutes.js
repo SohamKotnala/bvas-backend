@@ -22,7 +22,7 @@ router.post("/signup", async (req, res) => {
       `
       INSERT INTO users (username, password_hash, role, district_code)
       VALUES ($1, $2, $3, $4)
-      RETURNING id, role
+      RETURNING id
       `,
       [username, passwordHash, role, district_code || null]
     );
@@ -39,7 +39,9 @@ router.post("/signup", async (req, res) => {
       );
     }
 
-    return res.status(201).json({ message: "Signup successful" });
+    return res.status(201).json({
+      message: "Signup successful",
+    });
   } catch (err) {
     console.error("Signup error:", err);
     return res.status(500).json({ message: "Signup failed" });

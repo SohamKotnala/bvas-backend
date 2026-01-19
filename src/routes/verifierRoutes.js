@@ -9,10 +9,7 @@ const router = express.Router();
 
 /**
  * Get bills for district verifier
- * Supports:
- * /bills?status=READY_FOR_VERIFICATION
- * /bills?status=APPROVED
- * /bills?status=REJECTED
+ * Optional filter: ?status=READY_FOR_VERIFICATION|APPROVED|REJECTED
  */
 router.get(
   "/bills",
@@ -22,6 +19,12 @@ router.get(
     const { status } = req.query;
     const district = req.user.district_code;
 
+    if (!district) {
+      return res.status(403).json({
+        message: "Verifier district not found in token. Please re-login.",
+      });
+    }
+
     try {
       let query = `
         SELECT b.id, b.month, b.year, b.status, b.submitted_at,
@@ -29,6 +32,7 @@ router.get(
         FROM bills b
         JOIN vendors v ON b.vendor_id = v.id
       `;
+
       const params = [];
       const conditions = [];
 
@@ -36,18 +40,9 @@ router.get(
         params.push(status);
         conditions.push(`b.status = $${params.length}`);
       }
-      
-      if (!req.user.district_code) {
-  return res.status(403).json({
-    message: "Verifier district not found in token. Please re-login.",
-  });
-}
 
-
-      if (district) {
-        arams.push(req.user.district_code);
-conditions.push(`b.district_code = $${params.length}`);
-      }
+      params.push(district);
+      conditions.push(`b.district_code = $${params.length}`);
 
       if (conditions.length) {
         query += " WHERE " + conditions.join(" AND ");
@@ -58,21 +53,23 @@ conditions.push(`b.district_code = $${params.length}`);
       const result = await pool.query(query, params);
       res.json(result.rows);
     } catch (err) {
-      console.error(err);
+      console.error("VERIFIER BILLS ERROR:", err);
       res.status(500).json({ message: "Server error" });
     }
   }
 );
 
 /**
- * Shortcut: Get pending bills only
+ * Get pending bills only
  */
 router.get(
   "/bills/pending",
   authenticateToken,
   authorizeRoles("DISTRICT_VERIFIER"),
   async (req, res) => {
-    if (!req.user.district_code) {
+    const district = req.user.district_code;
+
+    if (!district) {
       return res.status(400).json({
         message: "Verifier district not found in token. Please re-login.",
       });
@@ -81,86 +78,33 @@ router.get(
     try {
       const result = await pool.query(
         `
-       SELECT
-  b.id,
-  b.month,
-  b.year,
-  u.username AS vendor_name,
-  b.rejection_count,
-
-  (
-    SELECT ba.remarks
-    FROM bill_actions ba
-    WHERE ba.bill_id = b.id
-      AND ba.role = 'VENDOR'
-    ORDER BY ba.created_at DESC
-    LIMIT 1
-  ) AS latest_vendor_remark
-
-FROM bills b
-JOIN vendors v ON b.vendor_id = v.id
-JOIN users u ON v.user_id = u.id
-
-WHERE b.status = 'READY_FOR_VERIFICATION'
-  AND b.district_code = $1
-
-ORDER BY b.id DESC;
-
-
+        SELECT
+          b.id,
+          b.month,
+          b.year,
+          u.username AS vendor_name,
+          b.rejection_count,
+          (
+            SELECT ba.remarks
+            FROM bill_actions ba
+            WHERE ba.bill_id = b.id
+              AND ba.role = 'VENDOR'
+            ORDER BY ba.created_at DESC
+            LIMIT 1
+          ) AS latest_vendor_remark
+        FROM bills b
+        JOIN vendors v ON b.vendor_id = v.id
+        JOIN users u ON v.user_id = u.id
+        WHERE b.status = 'READY_FOR_VERIFICATION'
+          AND b.district_code = $1
+        ORDER BY b.id DESC
         `,
-        [req.user.district_code]
+        [district]
       );
 
       res.json(result.rows);
     } catch (err) {
       console.error("VERIFIER PENDING ERROR:", err);
-      res.status(500).json({ message: "Server error" });
-    }
-  }
-);
-
-
-
-/**
- * Verifier – View handled bills (approved/rejected)
- * Optional filter: ?status=APPROVED|REJECTED
- */
-router.get(
-  "/bills/handled",
-  authenticateToken,
-  authorizeRoles("DISTRICT_VERIFIER"),
-  async (req, res) => {
-    const { status } = req.query;
-
-    try {
-      const conditions = [`b.verified_by = $1`];
-      const values = [req.user.userId];
-
-      if (status) {
-        values.push(status);
-        conditions.push(`b.status = $${values.length}`);
-      }
-
-      const result = await pool.query(
-        `
-        SELECT
-          b.id,
-          b.month,
-          b.year,
-          b.status,
-          b.rejection_count,
-          v.vendor_name
-        FROM bills b
-        JOIN vendors v ON b.vendor_id = v.id
-        WHERE ${conditions.join(" AND ")}
-        ORDER BY b.verified_at DESC
-        `,
-        values
-      );
-
-      res.json(result.rows);
-    } catch (err) {
-      console.error(err);
       res.status(500).json({ message: "Server error" });
     }
   }
@@ -177,40 +121,42 @@ router.post(
     const { billId } = req.params;
     const { action, remarks } = req.body;
     const verifierId = req.user.userId;
+    const district = req.user.district_code;
 
     if (!["APPROVE", "REJECT"].includes(action)) {
       return res.status(400).json({ message: "Invalid action" });
     }
 
     if (action === "REJECT" && !remarks) {
-      return res.status(400).json({ message: "Remarks required for rejection" });
+      return res.status(400).json({
+        message: "Remarks required for rejection",
+      });
     }
 
     try {
       const billResult = await pool.query(
-  "SELECT status, district_code FROM bills WHERE id = $1",
-  [billId]
-);
+        "SELECT status, district_code FROM bills WHERE id = $1",
+        [billId]
+      );
 
-if (billResult.rows.length === 0) {
-  return res.status(404).json({ message: "Bill not found" });
-}
+      if (billResult.rows.length === 0) {
+        return res.status(404).json({ message: "Bill not found" });
+      }
 
-if (billResult.rows[0].district_code !== req.user.district_code) {
+      const bill = billResult.rows[0];
 
-  return res.status(403).json({
-    message: "You are not allowed to act on bills from another district",
-  });
-}
+      if (bill.district_code !== district) {
+        return res.status(403).json({
+          message: "You are not allowed to act on bills from another district",
+        });
+      }
 
-
-      if (billResult.rows[0].status !== "READY_FOR_VERIFICATION") {
+      if (bill.status !== "READY_FOR_VERIFICATION") {
         return res.status(400).json({
           message: "Bill is not pending verification",
         });
       }
 
-      // Prevent approval without items
       if (action === "APPROVE") {
         const itemsResult = await pool.query(
           "SELECT COUNT(*) FROM bill_items WHERE bill_id = $1",
@@ -222,9 +168,34 @@ if (billResult.rows[0].district_code !== req.user.district_code) {
             message: "Cannot approve bill without bill items",
           });
         }
-      }
 
-      if (action === "REJECT") {
+        const crypto = require("crypto");
+        const signaturePayload = JSON.stringify({
+          billId,
+          approvedBy: verifierId,
+          approvedAt: new Date().toISOString(),
+        });
+
+        const signedHash = crypto
+          .createHash("sha256")
+          .update(signaturePayload)
+          .digest("hex");
+
+        await pool.query(
+          `
+          UPDATE bills
+          SET status = 'APPROVED',
+              verified_by = $1,
+              verified_at = NOW(),
+              remarks = NULL,
+              signed_hash = $2,
+              signed_at = NOW(),
+              signed_by = $1
+          WHERE id = $3
+          `,
+          [verifierId, signedHash, billId]
+        );
+      } else {
         await pool.query(
           `
           UPDATE bills
@@ -237,36 +208,7 @@ if (billResult.rows[0].district_code !== req.user.district_code) {
           `,
           [verifierId, remarks, billId]
         );
-      } else {
-  const crypto = require("crypto");
-
-  // Create a tamper-evident hash (mock digital signature)
-  const signaturePayload = JSON.stringify({
-    billId,
-    approvedBy: verifierId,
-    approvedAt: new Date().toISOString(),
-  });
-
-  const signedHash = crypto
-    .createHash("sha256")
-    .update(signaturePayload)
-    .digest("hex");
-
-  await pool.query(
-    `
-    UPDATE bills
-    SET status = 'APPROVED',
-        verified_by = $1,
-        verified_at = NOW(),
-        remarks = NULL,
-        signed_hash = $2,
-        signed_at = NOW(),
-        signed_by = $1
-    WHERE id = $3
-    `,
-    [verifierId, signedHash, billId]
-  );
-}
+      }
 
       await pool.query(
         `
@@ -283,7 +225,7 @@ if (billResult.rows[0].district_code !== req.user.district_code) {
             : "Bill rejected successfully",
       });
     } catch (err) {
-      console.error(err);
+      console.error("VERIFIER ACTION ERROR:", err);
       res.status(500).json({ message: "Server error" });
     }
   }

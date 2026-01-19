@@ -1,8 +1,6 @@
 const jwt = require("jsonwebtoken");
 
 function authenticateToken(req, res, next) {
-  console.log("AUTH HEADER:", req.headers.authorization);
-
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1];
 
@@ -15,17 +13,14 @@ function authenticateToken(req, res, next) {
       return res.status(403).json({ message: "Invalid or expired token" });
     }
 
-    console.log("JWT USER PAYLOAD:", user);
-    
     req.user = user;
     next();
   });
 }
 
-
 function authorizeRoles(...allowedRoles) {
   return (req, res, next) => {
-    if (!allowedRoles.includes(req.user.role)) {
+    if (!req.user || !allowedRoles.includes(req.user.role)) {
       return res.status(403).json({ message: "Forbidden: insufficient role" });
     }
     next();
