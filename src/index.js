@@ -1,18 +1,19 @@
 const express = require("express");
 const cors = require("cors");
+require("dotenv").config();
+
 const authRoutes = require("./routes/authRoutes");
-const { authenticateToken, authorizeRoles } = require("./middleware/authMiddleware");
 const vendorRoutes = require("./routes/vendorRoutes");
 const verifierRoutes = require("./routes/verifierRoutes");
 const hqRoutes = require("./routes/hqRoutes");
-
-
-require("dotenv").config();
-
+const { authenticateToken, authorizeRoles } = require("./middleware/authMiddleware");
 const pool = require("./db");
 
 const app = express();
 
+/* ===============================
+   ✅ CORS (FIXED FOR NODE 22)
+================================ */
 app.use(
   cors({
     origin: "*",
@@ -21,10 +22,15 @@ app.use(
   })
 );
 
-// 🔥 THIS LINE IS CRITICAL
+/* ❌ REMOVE THIS LINE — IT BREAKS EXPRESS 5 / NODE 22
 app.options("*", cors());
+*/
+
 app.use(express.json());
 
+/* ===============================
+   HEALTH CHECK
+================================ */
 app.get("/", async (req, res) => {
   try {
     const result = await pool.query("SELECT NOW()");
@@ -38,10 +44,17 @@ app.get("/", async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 5000;
-
+/* ===============================
+   ROUTES
+================================ */
 app.use("/api/auth", authRoutes);
+app.use("/api/vendor", vendorRoutes);
+app.use("/api/verifier", verifierRoutes);
+app.use("/api/hq", hqRoutes);
 
+/* ===============================
+   PROTECTED TEST ROUTES
+================================ */
 app.get(
   "/api/protected/vendor",
   authenticateToken,
@@ -63,13 +76,10 @@ app.get(
   }
 );
 
-app.use("/api/vendor", vendorRoutes);
-
-app.use("/api/verifier", verifierRoutes);
-
-app.use("/api/hq", hqRoutes);
-
-
+/* ===============================
+   SERVER
+================================ */
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
