@@ -1,0 +1,6 @@
+module.exports = {
+  DRAFT: "DRAFT",
+  READY: "READY_FOR_VERIFICATION",
+  APPROVED: "APPROVED",
+  REJECTED: "REJECTED",
+};
